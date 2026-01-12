@@ -48,6 +48,18 @@ class OllamaService:
             logger.error(f"Failed to list models: {e}")
             return []
     
+    async def get_running_models(self) -> list:
+        """Get currently running/loaded models"""
+        try:
+            response = await self.client.get(f"{self.base_url}/api/ps")
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('models', [])
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get running models: {e}")
+            return []
+    
     async def chat(
         self,
         messages: list,
@@ -165,12 +177,16 @@ class OllamaService:
     async def get_model_info(self) -> Dict[str, Any]:
         """Get model information"""
         models = await self.list_models()
+        running_models = await self.get_running_models()
         
         model_info = None
         for model in models:
             if model.get('name', '').startswith(self.model_name):
                 model_info = model
                 break
+        
+        # Check if model is actually running
+        is_running = any(m.get('name', '').startswith(self.model_name) for m in running_models)
         
         return {
             "id": self.model_name,
@@ -180,10 +196,156 @@ class OllamaService:
             "format": "GGUF",
             "backend": "ollama",
             "loaded": model_info is not None,
+            "running": is_running,
             "size": model_info.get('size', 0) if model_info else 0,
             "modified_at": model_info.get('modified_at', '') if model_info else ''
         }
     
+    async def pull_model(self, model_name: str) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Pull a model from Ollama library
+        
+        Args:
+            model_name: Name of the model to pull
+            
+        Yields:
+            Progress updates
+        """
+        try:
+            payload = {"name": model_name, "stream": True}
+            async with self.client.stream(
+                'POST',
+                f"{self.base_url}/api/pull",
+                json=payload
+            ) as response:
+                if response.status_code != 200:
+                    error_msg = f"Failed to pull model: {response.status_code}"
+                    logger.error(error_msg)
+                    raise RuntimeError(error_msg)
+                
+                async for line in response.aiter_lines():
+                    if line.strip():
+                        try:
+                            data = json.loads(line)
+                            yield data
+                        except json.JSONDecodeError:
+                            continue
+                            
+        except Exception as e:
+            logger.error(f"Error pulling model {model_name}: {e}")
+            raise
+
+    async def create_model(self, model_name: str, modelfile_path: str = "Modelfile") -> AsyncIterator[Dict[str, Any]]:
+        """
+        Create a model from a Modelfile
+        
+        Args:
+            model_name: Name of the model to create
+            modelfile_path: Path to the Modelfile
+            
+        Yields:
+            Progress updates
+        """
+        try:
+            # Read Modelfile
+            try:
+                with open(modelfile_path, 'r') as f:
+                    modelfile_content = f.read()
+            except FileNotFoundError:
+                raise FileNotFoundError(f"Modelfile not found at {modelfile_path}")
+
+            payload = {
+                "name": model_name, 
+                "modelfile": modelfile_content,
+                "stream": True
+            }
+            
+            async with self.client.stream(
+                'POST',
+                f"{self.base_url}/api/create",
+                json=payload
+            ) as response:
+                if response.status_code != 200:
+                    error_msg = f"Failed to create model: {response.status_code}"
+                    logger.error(error_msg)
+                    raise RuntimeError(error_msg)
+                
+                async for line in response.aiter_lines():
+                    if line.strip():
+                        try:
+                            data = json.loads(line)
+                            yield data
+                        except json.JSONDecodeError:
+                            continue
+                            
+        except Exception as e:
+            logger.error(f"Error creating model {model_name}: {e}")
+            raise
+
+    async def delete_model(self, model_name: str) -> bool:
+        """
+        Delete a model
+        
+        Args:
+            model_name: Name of the model to delete
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # First, try to unload the model if it's running
+            running_models = await self.get_running_models()
+            is_running = any(m.get('name', '').startswith(model_name) for m in running_models)
+            
+            if is_running:
+                logger.info(f"Model {model_name} is running, unloading before deletion...")
+                # Unload by sending empty chat with keep_alive=0
+                try:
+                    payload = {
+                        "model": model_name,
+                        "messages": [],
+                        "keep_alive": 0
+                    }
+                    await self.client.post(f"{self.base_url}/api/chat", json=payload)
+                except Exception as e:
+                    logger.warning(f"Failed to unload model before deletion: {e}")
+            
+            # Now delete
+            import json as json_lib
+            response = await self.client.request(
+                'DELETE',
+                f"{self.base_url}/api/delete",
+                content=json_lib.dumps({"name": model_name}),
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Successfully deleted model {model_name}")
+                return True
+            else:
+                logger.error(f"Failed to delete model {model_name}: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error deleting model {model_name}: {e}")
+            raise
+
+    async def unload_model(self) -> bool:
+        """
+        Unload current model from memory by setting keep_alive to 0
+        """
+        try:
+            # Send an empty chat request with keep_alive=0 to unload
+            payload = {
+                "model": self.model_name,
+                "messages": [],
+                "keep_alive": 0
+            }
+            await self.client.post(f"{self.base_url}/api/chat", json=payload)
+            return True
+        except Exception as e:
+            logger.error(f"Error unloading model: {e}")
+            return False
+
     async def close(self):
         """Close the HTTP client"""
         await self.client.aclose()

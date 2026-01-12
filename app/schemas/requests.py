@@ -7,10 +7,19 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal
 
 
+class FileAttachment(BaseModel):
+    """File attachment metadata"""
+    filename: str
+    content: str  # Base64 encoded file content or extracted text
+    mime_type: Optional[str] = None
+    size: Optional[int] = None
+
+
 class Message(BaseModel):
     """Chat message"""
     role: Literal["system", "user", "assistant"]
     content: str
+    attachments: Optional[List[FileAttachment]] = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -115,3 +124,20 @@ class ModelsResponse(BaseModel):
     """Models list response"""
     object: str = "list"
     data: List[ModelInfo]
+
+
+class FileUploadResponse(BaseModel):
+    """File upload response"""
+    id: str
+    filename: str
+    size: int
+    format: str
+    stored_in_rag: bool
+    message: str
+    metadata: Dict[str, Any] = {}
+
+
+class FileListResponse(BaseModel):
+    """List of uploaded files"""
+    files: List[Dict[str, Any]]
+    total: int

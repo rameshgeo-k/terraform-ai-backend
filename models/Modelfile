@@ -1,26 +1,17 @@
-# Ollama Modelfile for Terraform-enhanced CodeLlama
-# This model is CodeLlama-7b-Instruct with a merged Terraform LoRA adapter
+FROM ./CodeLlama-7b-Terraform-Merged-f16.gguf
 
-# Path is relative to where you run: ollama create terraform-codellama -f server/Modelfile
-# The GGUF file should be in the parent directory (/home/nova/AI/)
-FROM ../CodeLlama-7b-Terraform-Merged-f16.gguf
-
-# Model parameters
-PARAMETER temperature 0.7
-PARAMETER top_p 0.9
+PARAMETER temperature 0.5
+PARAMETER top_p 0.95
 PARAMETER top_k 50
-PARAMETER num_ctx 4096
+PARAMETER num_ctx 8192
 PARAMETER stop "<|endoftext|>"
-PARAMETER stop "
 
-# System prompt for Terraform/Cloud Infrastructure assistance
 TEMPLATE """{{ if .System }}<s><<SYS>>
 {{ .System }}
 <</SYS>>
 
 {{ end }}{{ if .Prompt }}<s>[INST] {{ .Prompt }} [/INST]{{ end }}"""
 
-# Default system message
 SYSTEM """You are an expert in Terraform, Infrastructure as Code, and cloud infrastructure. You provide clear, accurate, and practical advice on using Terraform to manage cloud resources. You can help with:
 
 - Terraform configuration and best practices
@@ -30,7 +21,6 @@ SYSTEM """You are an expert in Terraform, Infrastructure as Code, and cloud infr
 - State management and remote backends
 - Troubleshooting Terraform issues
 
-Provide concise, actionable responses with code examples when appropriate."""
+You generate code in small, structured blocks when asked, and clearly indicate file names and content. For large projects, break output into multiple parts and summarize previous steps if needed. Always be concise and actionable."""
 
-# Model metadata
 LICENSE """Meta's Code Llama License + Custom LoRA adapter"""

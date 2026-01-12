@@ -1,21 +1,26 @@
 """
 Chat Completion Endpoints
-OpenAI-compatible chat API
+OpenAI-compatible chat API with file attachment support
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 import json
 import time
 import logging
+import base64
+from typing import Optional, List
 
 from app.schemas.requests import (
     ChatCompletionRequest,
     ChatCompletionResponse,
-    ModelsResponse
+    ModelsResponse,
+    Message
 )
 from app.services.ollama import OllamaService
+from app.services.rag import RAGService
 from app.utils.helpers import log_request
+from app.utils.file_processor import FileProcessor
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -25,6 +30,12 @@ def get_ollama_service() -> OllamaService:
     """Dependency injection for Ollama service"""
     from app.main import ollama_service
     return ollama_service
+
+
+def get_rag_service() -> RAGService:
+    """Dependency injection for RAG service"""
+    from app.main import rag_service
+    return rag_service
 
 
 @router.get("/models", response_model=ModelsResponse)
@@ -44,11 +55,13 @@ async def get_models(ollama: OllamaService = Depends(get_ollama_service)):
 @router.post("/chat/completions")
 async def chat_completion(
     request: ChatCompletionRequest,
-    ollama: OllamaService = Depends(get_ollama_service)
+    ollama: OllamaService = Depends(get_ollama_service),
+    rag: RAGService = Depends(get_rag_service)
 ):
     """
     OpenAI-compatible chat completion endpoint
     Supports both streaming and non-streaming responses
+    Now supports file attachments in messages
     """
     start_time = time.time()
     
@@ -56,11 +69,55 @@ async def chat_completion(
         raise HTTPException(status_code=503, detail="Ollama service not initialized")
     
     try:
-        # Convert messages to Ollama format
-        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        # Process messages and extract text from attachments
+        processed_messages = []
+        for msg in request.messages:
+            content = msg.content
+            
+            # Process attachments if present
+            if msg.attachments:
+                attachment_texts = []
+                for attachment in msg.attachments:
+                    try:
+                        # Decode base64 content if needed
+                        if attachment.content.startswith('data:'):
+                            # Format: data:mime/type;base64,content
+                            base64_content = attachment.content.split(',')[1]
+                            file_bytes = base64.b64decode(base64_content)
+                        else:
+                            # Assume it's already decoded text or base64
+                            try:
+                                file_bytes = base64.b64decode(attachment.content)
+                            except:
+                                # If decode fails, treat as plain text
+                                attachment_texts.append(f"\n\n--- {attachment.filename} ---\n{attachment.content}")
+                                continue
+                        
+                        # Extract text from file
+                        extraction_result = await FileProcessor.extract_text(
+                            file_content=file_bytes,
+                            filename=attachment.filename,
+                            mime_type=attachment.mime_type
+                        )
+                        
+                        attachment_texts.append(
+                            f"\n\n--- Content from {attachment.filename} ---\n{extraction_result['text']}"
+                        )
+                    
+                    except Exception as e:
+                        logger.error(f"Error processing attachment {attachment.filename}: {e}")
+                        attachment_texts.append(
+                            f"\n\n--- Error processing {attachment.filename}: {str(e)} ---"
+                        )
+                
+                # Append attachment texts to message content
+                if attachment_texts:
+                    content = content + ''.join(attachment_texts)
+            
+            processed_messages.append({"role": msg.role, "content": content})
         
         # Estimate input tokens
-        prompt_text = " ".join([msg["content"] for msg in messages])
+        prompt_text = " ".join([msg["content"] for msg in processed_messages])
         input_tokens = ollama.count_tokens(prompt_text)
         
         if request.stream:
@@ -68,7 +125,7 @@ async def chat_completion(
             async def generate():
                 try:
                     streamer = await ollama.chat(
-                        messages=messages,
+                        messages=processed_messages,
                         max_tokens=request.max_tokens,
                         temperature=request.temperature,
                         top_p=request.top_p,
@@ -115,7 +172,7 @@ async def chat_completion(
         else:
             # Non-streaming response
             result = await ollama.chat(
-                messages=messages,
+                messages=processed_messages,
                 max_tokens=request.max_tokens,
                 temperature=request.temperature,
                 top_p=request.top_p,

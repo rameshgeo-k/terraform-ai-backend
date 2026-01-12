@@ -48,6 +48,10 @@ async def lifespan(app: FastAPI):
         logger.info("Initializing RAG service...")
         rag_service = RAGService()
         
+        # Attach to app state for access in endpoints
+        app.state.ollama_service = ollama_service
+        app.state.rag_service = rag_service
+        
         logger.info("Server initialization completed successfully")
         
     except Exception as e:
@@ -81,6 +85,7 @@ app.add_middleware(
 
 # Include API router
 app.include_router(api_router)
+
 
 
 @app.get("/")
