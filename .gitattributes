@@ -1,0 +1,16 @@
+# Git LFS tracking (optional - only if you want to use Git LFS for large files)
+# *.gguf filter=lfs diff=lfs merge=lfs -text
+
+# Line ending normalization
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+*.sh text eol=lf
+
+# Binary files
+*.pyc binary
+*.db binary
+*.sqlite3 binary

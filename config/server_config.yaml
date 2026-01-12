@@ -1,0 +1,46 @@
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1                         # Single worker for GPU sharing
+  reload: false                      # Set true for development
+  log_level: "info"
+
+# Model Configuration
+model:
+  ollama_base_url: "http://localhost:11434"
+  model_name: "terraform-codellama"
+  timeout: 300                       # Request timeout in seconds
+  keep_alive: "5m"                   # Keep model in memory
+  
+# Inference Configuration
+inference:
+  default_max_tokens: 512
+  default_temperature: 0.7
+  default_top_p: 0.9
+  default_top_k: 50
+  max_prompt_length: 4096            # Maximum input tokens
+  stream_chunk_size: 1               # Tokens per streaming chunk
+
+# RAG Configuration
+rag:
+  chroma_persist_directory: "./chroma"
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  default_top_k: 3
+  chunk_size: 512
+  chunk_overlap: 50
+  collection_name: "documents"       # Default collection name
+
+# Security
+security:
+  cors_origins: ["*"]                # CORS allowed origins
+  max_request_size: 10485760         # 10MB in bytes
+  request_timeout: 300               # 5 minutes in seconds
+  
+# Logging
+logging:
+  directory: "./logs"
+  level: "info"                      # debug, info, warning, error
+  format: "json"                     # json or text
+  rotation: "1 day"                  # Log rotation period
+  retention: "30 days"               # Log retention period
